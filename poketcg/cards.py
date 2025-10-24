@@ -44,6 +44,7 @@ class PokemonCard(Card):
 
     hp: int
     attacks: List[Attack] = field(default_factory=list)
+    external_id: int | None = None
 
     def describe(self) -> str:
         attacks = ", ".join(f"{a.name} ({a.damage})" for a in self.attacks)

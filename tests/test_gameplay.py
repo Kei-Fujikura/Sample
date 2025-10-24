@@ -19,3 +19,8 @@ def test_basic_game_flow():
     assert result.winner is not None
     assert game.players[result.winner].name == "Player 1"
     assert any("takes the final prize" in line for line in result.log)
+    assert result.snapshots
+    assert result.snapshots[0].description == "Setup complete"
+    assert result.snapshots[-1].description == "Game end"
+    for snapshot in result.snapshots:
+        assert snapshot.players

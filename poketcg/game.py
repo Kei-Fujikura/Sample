@@ -20,9 +20,34 @@ class Turn(Enum):
 
 
 @dataclass
+class PlayerSnapshot:
+    """Immutable view of a player's public board state for visualization."""
+
+    name: str
+    deck_size: int
+    hand_size: int
+    discard_size: int
+    prizes_remaining: int
+    active_name: Optional[str]
+    active_hp: int
+    active_external_id: Optional[int]
+
+
+@dataclass
+class GameSnapshot:
+    """Snapshot of the game board after a key event."""
+
+    active_turn: Turn
+    turn_count: int
+    description: str
+    players: dict[Turn, PlayerSnapshot]
+
+
+@dataclass
 class GameResult:
     winner: Optional[Turn]
     log: List[str]
+    snapshots: List[GameSnapshot]
 
 
 class PokemonGame:
@@ -44,6 +69,33 @@ class PokemonGame:
         self.turn = Turn.PLAYER_ONE
         self.turn_count = 0
         self.log: List[str] = []
+        self.snapshots: List[GameSnapshot] = []
+
+    def _snapshot_player(self, player: Player) -> PlayerSnapshot:
+        active = player.active_pokemon
+        return PlayerSnapshot(
+            name=player.name,
+            deck_size=len(player.deck.cards),
+            hand_size=len(player.hand),
+            discard_size=len(player.discard_pile),
+            prizes_remaining=len(player.prizes),
+            active_name=active.name if active is not None else None,
+            active_hp=player.active_hp,
+            active_external_id=getattr(active, "external_id", None) if active else None,
+        )
+
+    def _record_snapshot(self, description: str, *, active_turn: Optional[Turn] = None) -> None:
+        turn = active_turn if active_turn is not None else self.turn
+        snapshot = GameSnapshot(
+            active_turn=turn,
+            turn_count=self.turn_count,
+            description=description,
+            players={
+                Turn.PLAYER_ONE: self._snapshot_player(self.players[Turn.PLAYER_ONE]),
+                Turn.PLAYER_TWO: self._snapshot_player(self.players[Turn.PLAYER_TWO]),
+            },
+        )
+        self.snapshots.append(snapshot)
 
     def _setup_player(self, player: Player) -> None:
         self.random.shuffle(player.deck.cards)
@@ -71,12 +123,15 @@ class PokemonGame:
             self.log.append(
                 f"{player.name} opens with {player.active_pokemon.name} (HP {player.active_hp})."
             )
+        self.snapshots.clear()
+        self._record_snapshot("Setup complete")
 
-    def _draw_phase(self, player: Player) -> bool:
+    def _draw_phase(self, player: Player, *, active_turn: Turn) -> bool:
         """Handle the start-of-turn draw. Returns False if the player decks out."""
 
         if len(player.deck.cards) == 0:
             self.log.append(f"{player.name} cannot draw and loses by deck out.")
+            self._record_snapshot("Deck out", active_turn=active_turn)
             return False
         card = player.draw()[0]
         self.log.append(f"{player.name} draws {card.name}.")
@@ -121,12 +176,13 @@ class PokemonGame:
         self.turn_count += 1
         self.log.append(f"--- Turn {self.turn_count}: {player.name} ---")
 
-        if not self._draw_phase(player):
+        if not self._draw_phase(player, active_turn=active_turn):
             return active_turn.opposite()
 
         self._attack(player, opponent)
 
         winner = self._check_victory()
+        self._record_snapshot(f"After turn {self.turn_count}", active_turn=active_turn)
         self.turn = active_turn.opposite()
         return winner
 
@@ -141,7 +197,8 @@ class PokemonGame:
             self.log.append("Game ended due to turn limit.")
         else:
             self.log.append(f"Winner: {self.players[winner].name}")
-        return GameResult(winner=winner, log=list(self.log))
+        self._record_snapshot("Game end", active_turn=self.turn.opposite())
+        return GameResult(winner=winner, log=list(self.log), snapshots=list(self.snapshots))
 
     def clone(self) -> "PokemonGame":
         """Return a deep-ish copy of the game state for experimentation."""
